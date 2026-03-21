@@ -8,83 +8,111 @@ import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
+import io.ktor.server.netty.*
 import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.plugins.statuspages.*
 import io.ktor.server.response.*
 import kotlinx.serialization.json.Json
-import org.delcom.data.AppException
-import org.delcom.data.ErrorResponse
-import org.delcom.helpers.DatabaseHelper
-import org.delcom.helpers.ToolsHelper
+import org.delcom.helpers.JWTConstants
+import org.delcom.helpers.configureDatabases
+import org.delcom.helpers.configureStaticFiles
 import org.delcom.module.appModule
 import org.koin.ktor.plugin.Koin
 import org.koin.logger.slf4jLogger
 
-fun main(args: Array<String>): Unit = io.ktor.server.netty.EngineMain.main(args)
+fun main(args: Array<String>) {
+    val dotenv = dotenv {
+        directory = "."
+        ignoreIfMissing = false
+    }
+
+    dotenv.entries().forEach {
+        System.setProperty(it.key, it.value)
+    }
+
+    EngineMain.main(args)
+}
 
 fun Application.module() {
-    val dotenv = dotenv { ignoreIfMissing = true }
-    val jwtSecret = dotenv["JWT_SECRET"]
 
-    ToolsHelper.init(jwtSecret)
-
-    install(Koin) {
-        slf4jLogger()
-        modules(appModule)
-    }
-
-    DatabaseHelper.init(this)
-
-    install(ContentNegotiation) {
-        json(Json {
-            prettyPrint = true
-            isLenient = true
-            ignoreUnknownKeys = true
-        })
-    }
-
-    install(CORS) {
-        anyHost()
-        allowHeader(HttpHeaders.Authorization)
-        allowHeader(HttpHeaders.ContentType)
-        allowMethod(HttpMethod.Get)
-        allowMethod(HttpMethod.Post)
-        allowMethod(HttpMethod.Put)
-        allowMethod(HttpMethod.Delete)
-        allowMethod(HttpMethod.Options)
-    }
+    val jwtSecret = environment.config.property("ktor.jwt.secret").getString()
 
     install(Authentication) {
-        jwt("auth-jwt") {
-            verifier(JWT.require(Algorithm.HMAC256(jwtSecret)).build())
+        jwt(JWTConstants.NAME) {
+            realm = JWTConstants.REALM
+
+            verifier(
+                JWT
+                    .require(Algorithm.HMAC256(jwtSecret))
+                    .withIssuer(JWTConstants.ISSUER)
+                    .withAudience(JWTConstants.AUDIENCE)
+                    .build()
+            )
+
             validate { credential ->
-                if (credential.payload.subject != null) JWTPrincipal(credential.payload) else null
+                val userId = credential.payload
+                    .getClaim("userId")
+                    .asString()
+
+                if (!userId.isNullOrBlank())
+                    JWTPrincipal(credential.payload)
+                else null
             }
+
             challenge { _, _ ->
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    ErrorResponse(message = "Token tidak valid atau sudah kadaluarsa")
+                    mapOf(
+                        "status" to "error",
+                        "message" to "Token tidak valid"
+                    )
                 )
             }
         }
     }
 
-    install(StatusPages) {
-        exception<AppException> { call, cause ->
-            call.respond(
-                HttpStatusCode.fromValue(cause.statusCode),
-                ErrorResponse(message = cause.message ?: "Terjadi kesalahan")
-            )
-        }
-        exception<Throwable> { call, cause ->
-            call.application.log.error("Unhandled exception", cause)
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                ErrorResponse(message = "Internal server error")
-            )
-        }
+    install(CORS) {
+        anyHost()
+
+        // HTTP Methods
+        allowMethod(HttpMethod.Get)
+        allowMethod(HttpMethod.Post)
+        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Delete)
+        allowMethod(HttpMethod.Patch)
+        allowMethod(HttpMethod.Options)
+
+        // Headers yang umum dikirim browser
+        allowHeader(HttpHeaders.ContentType)
+        allowHeader(HttpHeaders.Authorization)
+        allowHeader(HttpHeaders.Accept)
+        allowHeader(HttpHeaders.Origin)
+        allowHeader(HttpHeaders.AccessControlAllowOrigin)
+
+        // Izinkan credentials (cookie/token) jika diperlukan
+        allowCredentials = true
+
+        // Izinkan browser membaca header response ini
+        exposeHeader(HttpHeaders.ContentDisposition)
     }
 
+    install(ContentNegotiation) {
+        json(
+            Json {
+                explicitNulls = false
+                prettyPrint = true
+                ignoreUnknownKeys = true
+            }
+        )
+    }
+
+    install(Koin) {
+        slf4jLogger()
+        // Teruskan instance Application ke appModule agar bisa membaca baseUrl dan jwtSecret
+        modules(appModule)
+    }
+
+    configureDatabases()
+    configureStaticFiles()   // Daftarkan folder uploads/ sebagai file statis publik
     configureRouting()
 }

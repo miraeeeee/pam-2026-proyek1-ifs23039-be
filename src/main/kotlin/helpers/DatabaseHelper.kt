@@ -33,3 +33,8 @@ object DatabaseHelper {
         application.log.info("Database connected: $name @ $host:$port")
     }
 }
+
+// Tambahan ini yang dipanggil di Application.kt
+fun Application.configureDatabases() {
+    DatabaseHelper.init(this)
+}
