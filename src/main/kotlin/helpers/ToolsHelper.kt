@@ -20,6 +20,8 @@ object ToolsHelper {
     fun generateAccessToken(userId: String): String {
         return JWT.create()
             .withSubject(userId)
+            .withIssuer(JWTConstants.ISSUER)
+            .withAudience(JWTConstants.AUDIENCE)
             .withExpiresAt(Date(System.currentTimeMillis() + 60 * 60 * 1000))
             .sign(Algorithm.HMAC256(jwtSecret))
     }
@@ -27,13 +29,18 @@ object ToolsHelper {
     fun generateRefreshToken(userId: String): String {
         return JWT.create()
             .withSubject(userId)
+            .withIssuer(JWTConstants.ISSUER)
+            .withAudience(JWTConstants.AUDIENCE)
             .withExpiresAt(Date(System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000))
             .sign(Algorithm.HMAC256(jwtSecret))
     }
 
     fun verifyToken(token: String): String? {
         return try {
-            val verifier = JWT.require(Algorithm.HMAC256(jwtSecret)).build()
+            val verifier = JWT.require(Algorithm.HMAC256(jwtSecret))
+                .withIssuer(JWTConstants.ISSUER)
+                .withAudience(JWTConstants.AUDIENCE)
+                .build()
             verifier.verify(token).subject
         } catch (e: Exception) {
             null

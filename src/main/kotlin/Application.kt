@@ -14,6 +14,7 @@ import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.response.*
 import kotlinx.serialization.json.Json
 import org.delcom.helpers.JWTConstants
+import org.delcom.helpers.ToolsHelper
 import org.delcom.helpers.configureDatabases
 import org.delcom.helpers.configureStaticFiles
 import org.delcom.module.appModule
@@ -37,6 +38,9 @@ fun Application.module() {
 
     val jwtSecret = environment.config.property("ktor.jwt.secret").getString()
 
+    // Inisialisasi ToolsHelper dengan secret yang sama
+    ToolsHelper.init(jwtSecret)
+
     install(Authentication) {
         jwt(JWTConstants.NAME) {
             realm = JWTConstants.REALM
@@ -50,9 +54,7 @@ fun Application.module() {
             )
 
             validate { credential ->
-                val userId = credential.payload
-                    .getClaim("userId")
-                    .asString()
+                val userId = credential.payload.subject  // fix: pakai subject bukan getClaim("userId")
 
                 if (!userId.isNullOrBlank())
                     JWTPrincipal(credential.payload)
@@ -73,26 +75,18 @@ fun Application.module() {
 
     install(CORS) {
         anyHost()
-
-        // HTTP Methods
         allowMethod(HttpMethod.Get)
         allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Put)
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
         allowMethod(HttpMethod.Options)
-
-        // Headers yang umum dikirim browser
         allowHeader(HttpHeaders.ContentType)
         allowHeader(HttpHeaders.Authorization)
         allowHeader(HttpHeaders.Accept)
         allowHeader(HttpHeaders.Origin)
         allowHeader(HttpHeaders.AccessControlAllowOrigin)
-
-        // Izinkan credentials (cookie/token) jika diperlukan
         allowCredentials = true
-
-        // Izinkan browser membaca header response ini
         exposeHeader(HttpHeaders.ContentDisposition)
     }
 
@@ -108,11 +102,10 @@ fun Application.module() {
 
     install(Koin) {
         slf4jLogger()
-        // Teruskan instance Application ke appModule agar bisa membaca baseUrl dan jwtSecret
         modules(appModule)
     }
 
     configureDatabases()
-    configureStaticFiles()   // Daftarkan folder uploads/ sebagai file statis publik
+    configureStaticFiles()
     configureRouting()
 }
